@@ -247,7 +247,7 @@ ErrorHandler:
 End Function
 
 ' Because Remedy does not allow "external" queries, we bypass this feature by using HTTP callbacks
-Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, ByVal delStatus As String)
+Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, Optional delStatus As String = "-1")
     With GetIEHandler("Remedy")
         ' Used to prevent the "Stay on this page/Leave this page" popup
         .document.parentWindow.execScript "window.onbeforeunload = null;", "Javascript"
