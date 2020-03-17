@@ -58,6 +58,19 @@ ErrorHandler:
     GoTo Start
 End Function
 
+' Used to dispatch a keyboard event change
+Private Function HTMLElementDispatchValue(ByRef objDocument, ByRef objElement As Object, ByVal strValue As String)
+    ' Used to dispatch the "change" event to the item object
+    Dim post As Object, evt As Object
+    Set evt = objDocument.createEvent("keyboardevent")
+    evt.initEvent "change", True, False
+    
+    Set post = objElement
+        post.Value = strValue
+        post.fireEvent "onchange"
+    post.dispatchEvent evt
+End Function
+
 Private Function CheckRemedySynUpsStatus()
 Start:
     ' If 'Remedy' tab is not open
@@ -111,7 +124,7 @@ Private Function SyncreonNewSearch()
     CheckRemedySynUpsStatus
 
     If SyncreonSearchActive() = False Then
-        GetIEHandler("ECI Call").document.getElementByID("webapp_ui_button_button_3").Click
+        GetIEHandler("ECI Call").document.getElementById("webapp_ui_button_button_3").Click
     End If
     
     CheckRemedySynUpsStatus
@@ -128,9 +141,38 @@ Private Function SyncreonSearchINC(inc As String)
         ' Used to check if Syncreon session is still valid
         CheckRemedySynUpsStatus
         
-        .document.getElementByID("_QRY_eci_call_in.remedy").innerText = inc
-        .document.getElementByID("webapp_ui_button_button_8").Click
+        HTMLElementDispatchValue .document, .document.getElementById("_QRY_eci_call_in.remedy"), inc
+        .document.getElementById("webapp_ui_button_button_8").Click
     End With
+End Function
+
+Private Function UPSGetDeliveryDate(ByVal trackingNumber) As String
+    On Error GoTo ErrorHandler:
+    
+    delDate = ""
+    
+    With GetIEHandler("UPS")
+        ' Searches the Tracking Number
+        .Navigate "https://www.ups.com/track?loc=en_US&tracknum=" & trackingNumber
+                
+        While .ReadyState <> 4 Or .Busy Or Not (TypeName(.document.getElementById("toTitle")) = "Null"): DoEvents: Wend
+        CheckRemedySynUpsStatus
+    
+        ' Retrieves the date
+        delDate = .document.getElementById("stApp_deliveredDate").innerText
+        ' Retrieves the hour (12h) and converts to 24h
+        delHour = Mid(.document.getElementById("stApp_eodDate").innerText, InStr(.document.getElementById("stApp_eodDate").innerText, ":") - 2)
+        delHour = Replace(delHour, ".", "")
+        delHour = Format(delHour, "HH:mm")
+        delDate = delDate & " " & delHour
+        
+        UPSGetDeliveryDate = delDate
+    End With
+    
+ErrorHandler:
+    If Len(delDate) = 0 Then
+        UPSGetDeliveryDate = ""
+    End If
 End Function
 
 Private Function SyncreonCheckDeliveryStatus(ByRef statusVal As String) As String
@@ -144,52 +186,49 @@ Private Function SyncreonCheckDeliveryStatus(ByRef statusVal As String) As Strin
         While .ReadyState <> 4 Or .Busy: DoEvents: Wend
         CheckRemedySynUpsStatus
         
-        delStatus = .document.getElementByID("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carr_statdesc_cell").innerText
+        trackingNumber = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_tracknbr_cell").innerText
+        delStatus = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carr_statdesc_cell").innerText
         
         If delStatus = "Delivered" Then
             ' Extracts the Tracking Number
-            trackingNumber = .document.getElementByID("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_tracknbr_cell").innerText
             trackingNumber = Mid(trackingNumber, InStr(trackingNumber, ">") + 1, 18)
             
             ' UPS
-            With GetIEHandler("UPS")
-                ' Searches the Tracking Number
-                .Navigate "https://www.ups.com/track?loc=en_US&tracknum=" & trackingNumber
-                
-                While .ReadyState <> 4 Or .Busy Or Not (TypeName(.document.getElementByID("toTitle")) = "Null"): DoEvents: Wend
-                CheckRemedySynUpsStatus
-                
-                ' Retrieves the date
-                delDate = .document.getElementByID("stApp_deliveredDate").innerText
-                ' Retrieves the hour (12h) and converts to 24h
-                delHour = Mid(.document.getElementByID("stApp_eodDate").innerText, InStr(.document.getElementByID("stApp_eodDate").innerText, ":") - 2)
-                delHour = Replace(delHour, ".", "")
-                delHour = Format(delHour, "HH:mm")
-                
-                delDate = delDate & " " & delHour
-                
-                statusVal = delStatus
-                SyncreonCheckDeliveryStatus = delDate
-            End With
+            statusVal = delStatus
+            SyncreonCheckDeliveryStatus = UPSGetDeliveryDate(trackingNumber)
         ElseIf delStatus = "Entregado" Then
             CheckRemedySynUpsStatus
             
-            delDate = .document.getElementByID("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_dt_rec_cell").innerText
+            delDate = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_dt_rec_cell").innerText
             
             statusVal = delStatus
             SyncreonCheckDeliveryStatus = Left(delDate, Len(delDate) - 3)
         Else
-        ' If is not delivered
             CheckRemedySynUpsStatus
             
-            statusVal = delStatus
+            ' If it was delivered through UPS but in Syncreon appears SKYNET as carrier
+            If .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carrier_cell").innerText = "SKYNET" Then
+                ' UPS
+                delDate = UPSGetDeliveryDate(trackingNumber)
+                
+                If Len(delDate) > 0 Then
+                    SyncreonCheckDeliveryStatus = delDate
+                
+                    statusVal = "Delivered"
+                Else
+                    statusVal = "-1"
+                End If
+            Else
+                ' Packaged not delivered
+                statusVal = delStatus
+            End If
         End If
         Exit Function
         
 ErrorHandler:
         ' First we check for the "NO EXISTE" syncreon comment
-        If Not (.document.getElementByID("H__eci_call_in.comments_syncreon") Is Nothing) Then
-            syncComment = .document.getElementByID("H__eci_call_in.comments_syncreon").innerText
+        If Not (.document.getElementById("H__eci_call_in.comments_syncreon") Is Nothing) Then
+            syncComment = .document.getElementById("H__eci_call_in.comments_syncreon").innerText
             
             ' If the "NO EXISTE" syncreon comment exists
             If Len(syncComment) <> 0 Then
@@ -208,7 +247,7 @@ ErrorHandler:
 End Function
 
 ' Because Remedy does not allow "external" queries, we bypass this feature by using HTTP callbacks
-Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy)
+Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, ByVal delStatus As String)
     With GetIEHandler("Remedy")
         ' Used to prevent the "Stay on this page/Leave this page" popup
         .document.parentWindow.execScript "window.onbeforeunload = null;", "Javascript"
@@ -221,6 +260,20 @@ Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy)
     ' Wait for the new Remedy tab to load and assign the handler
     While Remedy Is Nothing: Set Remedy = GetIEHandler("Remedy"): DoEvents: Wend
     While Remedy.ReadyState <> 4 Or Remedy.Busy: DoEvents: Wend
+    
+    ' If the package was refused adds the notes to Remedy
+    If InStr(delStatus, "refused") > 0 Or InStr(delStatus, "sender") > 0 Then
+        With Remedy
+            Application.Wait (Now + TimeValue("0:00:5"))
+        
+            ' Adds the notes
+            HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_304247080"), delStatus
+            ' Checks the 'Public' checkbox
+            .document.getElementById("WIN_1_rc1id1000000761").Click
+            ' Saves the changes
+            .document.getElementById("WIN_1_301614800").Click
+        End With
+    End If
 End Function
 
 ' Function used to click on the Status Reason Item
@@ -247,18 +300,17 @@ Private Function RemedyProcessINC_statReasonNoFurthActReqClick()
         .document.parentWindow.execScript "var e = document.createElement('INPUT');e.setAttribute('id', 'adi_marian_mutu');e.setAttribute('type', 'hidden');document.body.appendChild(e);", "Javascript"
     
         ' Expands the Status Reason listbox
-        .document.getElementByID("arid_WIN_1_1000000881").Click
+        .document.getElementById("arid_WIN_1_1000000881").Click
         
         ' Waits for the list to load
         While .ReadyState <> 4 Or .Busy: DoEvents: Wend
         Application.Wait (Now + TimeValue("0:00:5"))
         
         ' Retrieves and saves into the hidden input box the element coordinates (In Javascript)
-        '.Document.parentWindow.execScript "try { var el = document.getElementsByClassName(""MenuTable"")(0).getElementsByClassName(""MenuTableBody"")(0).getElementsByClassName(""MenuEntryName"")(5); var _x = 0; var _y = 0; while( el && !isNaN( el.offsetLeft ) && !isNaN( el.offsetTop ) ) { _x += el.offsetLeft - el.scrollLeft; _y += el.offsetTop - el.scrollTop; el = el.offsetParent; } document.getElementById(""adi_marian_mutu"").value = _x + "","" + _y; } catch(err) { window.alert(""<PDARFID_AUTO_JS_NoFurthActClick_ERROR>\n\n"" + err); }", "Javascript"
         .document.parentWindow.execScript "try { var el = document.getElementsByClassName(""MenuTable"")(0).getElementsByClassName(""MenuTableBody"")(0).getElementsByClassName(""MenuEntryName"")(5);function getPosition(el){var xPos = 0;var yPos = 0;while (el) {if (el.tagName == ""BODY"") {var xScroll = el.scrollLeft || document.documentElement.scrollLeft;var yScroll = el.scrollTop || document.documentElement.scrollTop;xPos += (el.offsetLeft - xScroll + el.clientLeft);yPos += (el.offsetTop - yScroll + el.clientTop);} else {xPos += (el.offsetLeft - el.scrollLeft + el.clientLeft);yPos += (el.offsetTop - el.scrollTop + el.clientTop);}el = el.offsetParent;}return{x: xPos,y: yPos};} var _p = getPosition(el); document.getElementById(""adi_marian_mutu"").value = _p.x + "","" + _p.y; } catch(err) { window.alert(""<PDARFID_AUTO_JS_NoFurthActClick_ERROR>\n\n"" + err); }", "Javascript"
         
         ' Calculates the correct element coordinates
-        coord_str = .document.getElementByID("adi_marian_mutu").Value
+        coord_str = .document.getElementById("adi_marian_mutu").Value
         x = .Left + (Left(coord_str, InStr(coord_str, ",") - 1) + 50)
         y = .Top + (Right(coord_str, InStr(coord_str, ",") - 1) + 72)
         
@@ -294,40 +346,43 @@ Private Function RemedyProcessINC(ByVal inc As String, ByVal note As String) As 
         CheckRemedySynUpsStatus
         Application.Wait (Now + TimeValue("0:00:2"))
         
-        remedyTktStatus = .document.getElementByID("arid_WIN_1_7").Value
+        remedyTktStatus = .document.getElementById("arid_WIN_1_7").Value
         If remedyTktStatus <> "Resolved" And remedyTktStatus <> "Closed" Then
-            ' Used to change and update the Status table
-            Dim post As Object, evt As Object
-            Set evt = .document.createEvent("keyboardevent")
-            evt.initEvent "change", True, False
-
-            ' Add the Delivery Date to the 'Notes' inputbox
-            Set post = .document.getElementByID("arid_WIN_1_304247080")
-                post.Value = "Delivered on: " & note
-            post.dispatchEvent evt
-            ' Checks the 'Public' checkbox
-            .document.getElementByID("WIN_1_rc1id1000000761").Click
             ' Changes the Status dropbox menu to Resolved
-            Set post = .document.getElementByID("arid_WIN_1_7")
-                post.Value = "Resolved"
-            post.dispatchEvent evt
+            HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_7"), "Resolved"
             ' Changes the Status Reason dropbox menu to No Further Action Required
             RemedyProcessINC_statReasonNoFurthActReqClick
             
             ' Before saving the changes, checks if the Status Reason is "No Further Action Required"
-            If .document.getElementByID("arid_WIN_1_1000000881").Value <> "No Further Action Required" Then
+            If .document.getElementById("arid_WIN_1_1000000881").Value <> "No Further Action Required" Then
                 MsgBox ("[PDA & RFID PROCESS]" & vbNewLine & vbNewLine & "Unable to correctly click on ""No Further Action Required"" item!" & vbNewLine & vbNewLine & " > Click ""Ok"" to stop the script and try again" & vbNewLine & vbNewLine & "> If the problem persists, please call Adi")
-                'RemedyProcessINC = 0
                 End
             End If
             
+            ' Add the Delivery Date to the 'Notes' inputbox
+            ' Before adding the Delivery Date note, checks if is already present
+            delNote = "Delivered on: " & note
+            dn = .document.getElementById("T301389614").innerText
+            
+            If InStr(dn, "Delivered on:") > 0 Then
+                dn = Mid(dn, InStr(dn, "Delivered on:"))
+                dn = Mid(dn, 1, InStr(dn, vbNewLine) - 1)
+            End If
+            
+            If dn <> delNote Then
+                HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_304247080"), delNote
+            End If
+            
+            ' Checks the 'Public' checkbox
+            .document.getElementById("WIN_1_rc1id1000000761").Click
+            
             ' Saves the changes
-            .document.getElementByID("WIN_1_301614800").Click
+            .document.getElementById("WIN_1_301614800").Click
             
             ' Checks if the tkt was successfully saved
             Application.Wait (Now + TimeValue("0:00:5"))
             
-            If TypeName(.document.getElementByID("pbartable").getElementsByClassName("prompttext prompttexterr")(0)) <> "Nothing" Then
+            If TypeName(.document.getElementById("pbartable").getElementsByClassName("prompttext prompttexterr")(0)) <> "Nothing" Then
                 RemedyProcessINC = 0
             Else
                 RemedyProcessINC = 1
@@ -342,7 +397,7 @@ Private Function RemedyExtractSR(ByRef Remedy As Object) As String
     On Error GoTo ErrorHandler:
 
     With Remedy
-        r = .document.getElementByID("arid_WIN_1_1000000652").innerText
+        r = .document.getElementById("arid_WIN_1_1000000652").innerText
         
         Dim rgx As Object
         Set rgx = CreateObject("VBScript.RegExp"): rgx.Pattern = "[0-9]":
@@ -418,7 +473,7 @@ Public Sub PDARFIDAuto()
         ' Skip the hidden rows
         If Not Rng.EntireRow.Hidden Then
             inc = Range(incColumn & Rng.Row)
-            
+        
             ' Working feedback
             Range("A" & Rng.Row & ":Z" & Rng.Row).Interior.ColorIndex = 43
             Range(notesColumn & Rng.Row) = "<...working...>"
@@ -439,10 +494,15 @@ Public Sub PDARFIDAuto()
                     Range(notesColumn & Rng.Row) = "<remedy_could_not_resolve_tkt>"
                 ElseIf remResult = 1 Then
                     Range(notesColumn & Rng.Row) = "<remedy_tkt_resolved>"
+                    
+                    ' Changes the color of successfully received and saved tkts
+                    Range(notesColumn & Rng.Row).Font.ColorIndex = 10
+                    Range(srColumn & Rng.Row).Font.ColorIndex = 10
+                    Range(delDateColumn & Rng.Row).Font.ColorIndex = 10
                 Else
                     Range(notesColumn & Rng.Row) = "<remedy_tkt_already_resolved>"
                 End If
-            
+                
                 ' Extracts the SR
                 Range(srColumn & Rng.Row) = RemedyExtractSR(GetIEHandler("Remedy"))
                 ' Updates the Delivery Date column
@@ -464,7 +524,7 @@ Public Sub PDARFIDAuto()
                     Dim IERemedy As Object
                     Set IERemedy = Nothing
                     ' Searches the INC on Remedy
-                    RemedyOpenINC inc, IERemedy
+                    RemedyOpenINC inc, IERemedy, delStatus
                     ' Delay to allow the page elements to load
                     Application.Wait (Now + TimeValue("0:00:3"))
                     ' Extracts the SR
