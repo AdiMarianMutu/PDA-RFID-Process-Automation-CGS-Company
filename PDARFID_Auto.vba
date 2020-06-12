@@ -125,7 +125,7 @@ Private Function SyncreonNewSearch()
     CheckRemedySynUpsStatus
 
     If SyncreonSearchActive() = False Then
-        GetIEHandler("ECI Call").document.GetElementById("webapp_ui_button_button_3").Click
+        GetIEHandler("ECI Call").document.getElementById("webapp_ui_button_button_3").Click
     End If
     
     CheckRemedySynUpsStatus
@@ -142,11 +142,56 @@ Private Function SyncreonSearchINC(inc As String)
         ' Used to check if Syncreon session is still valid
         CheckRemedySynUpsStatus
         
-        HTMLElementDispatchValue .document, .document.GetElementById("_QRY_eci_call_in.remedy"), inc
-        .document.GetElementById("webapp_ui_button_button_8").Click
+        HTMLElementDispatchValue .document, .document.getElementById("_QRY_eci_call_in.remedy"), inc
+        .document.getElementById("webapp_ui_button_button_8").Click
     End With
 End Function
 
+Private Function UPSFormatDeliveryHour(ByVal hour) As String
+    ' Converts to 24h
+    hour = Replace(hour, ".", "")
+    
+    UPSFormatDeliveryHour = Format(hour, "HH:mm")
+End Function
+Private Function UPSUpdateStatusCheck() As String
+On Error Resume Next
+    
+    ' Used only for the 'Update' status
+    ' Sometimes UPS shows the 'Update' status and by clicking 'Detailed View' we can get more info
+    ' sometimes successfully delivered status are placed in the 'Update' status, so we must check
+    Dim u_status As String
+    Dim cnt As Integer: cnt = 0
+    Dim i As Integer
+    Dim whileFlag As Boolean: whileFlag = True
+    
+    With GetIEHandler("UPS")
+        While whileFlag
+            u_status = .document.getElementById("stApp_ShpmtProg_LVP_milestone_name_" & cnt).innerText
+            
+            If InStr(u_status, "Delivered") Then
+                delDate = .document.getElementById("stApp_ShpmtProg_LVP_milestone_" & cnt & "_date_1").innerText
+                delHour = .document.getElementById("stApp_ShpmtProg_LVP_milestone_" & cnt & "_time_1").innerText
+                    
+                delDate = delDate & " " & UPSFormatDeliveryHour(delHour)
+                
+                GoTo finish
+            End If
+                
+            ' If more than 15 rows, will raise the <manual_check_required> status
+            If cnt > 15 Then
+                whileFlag = False
+            End If
+                
+            cnt = cnt + 1
+        Wend
+    End With
+    
+' No 'Delivered' note found
+delDate = "Update"
+
+finish:
+    UPSUpdateStatusCheck = delDate
+End Function
 Private Function UPSGetDeliveryDate(ByVal trackingNumber) As String
     On Error GoTo ErrorHandler:
     
@@ -157,21 +202,20 @@ Private Function UPSGetDeliveryDate(ByVal trackingNumber) As String
         ' Searches the Tracking Number
         .Navigate "https://www.ups.com/track?loc=en_US&tracknum=" & trackingNumber
                 
-        While .ReadyState <> 4 Or .Busy Or Not (TypeName(.document.GetElementById("toTitle")) = "Null"): DoEvents: Wend
+        While .ReadyState <> 4 Or .Busy Or Not (TypeName(.document.getElementById("toTitle")) = "Null"): DoEvents: Wend
         CheckRemedySynUpsStatus
         
-        delStatus = .document.GetElementById("stApp_txtPackageStatus").InnerText
+        delStatus = .document.getElementById("stApp_txtPackageStatus").innerText
         
         If InStr(LCase(delStatus), "delivered") Then
             ' Retrieves the date
-            delDate = .document.GetElementById("stApp_deliveredDate").InnerText
+            delDate = .document.getElementById("stApp_deliveredDate").innerText
             ' Retrieves the hour (12h) and converts to 24h
-            delHour = Mid(.document.GetElementById("stApp_eodDate").InnerText, InStr(.document.GetElementById("stApp_eodDate").InnerText, ":") - 2)
-            delHour = Replace(delHour, ".", "")
-            delHour = Format(delHour, "HH:mm")
-            delDate = delDate & " " & delHour
-        
+            delDate = delDate & " " & UPSFormatDeliveryHour(Mid(.document.getElementById("stApp_eodDate").innerText, InStr(.document.getElementById("stApp_eodDate").innerText, ":") - 2))
+
             UPSGetDeliveryDate = delDate
+        ElseIf InStr(LCase(delStatus), "update") Then
+            UPSGetDeliveryDate = UPSUpdateStatusCheck()
         Else
             UPSGetDeliveryDate = delStatus
         End If
@@ -182,8 +226,9 @@ ErrorHandler:
     If Len(delDate) = 0 Then
         ' UPS could not locate the shipment details for this tracking number
         With GetIEHandler("UPS")
-            If TypeName(.document.GetElementById("stApp_error_alert_list0")) <> "Null" Then
-                UPSGetDeliveryDate = .document.GetElementById("stApp_error_alert_list0").InnerText
+            If TypeName(.document.getElementById("stApp_error_alert_list0")) <> "Null" Then
+                UPSGetDeliveryDate = .document.getElementById("stApp_error_alert_list0").innerText
+                Exit Function
             End If
         End With
     End If
@@ -200,37 +245,40 @@ Private Function SyncreonCheckDeliveryStatus(ByRef statusVal As String) As Strin
         While .ReadyState <> 4 Or .Busy: DoEvents: Wend
         CheckRemedySynUpsStatus
         
-        trackingNumber = .document.GetElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_tracknbr_cell").InnerText
+        trackingNumber = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_tracknbr_cell").innerText
         ' Extracts the tracking number from the bugged HTML href tag
         If InStr(trackingNumber, "<") > 0 Then
             trackingNumber = Mid(trackingNumber, InStr(trackingNumber, ">") + 1, 18)
         End If
         
-        delStatus = .document.GetElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carr_statdesc_cell").InnerText
+        delStatus = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carr_statdesc_cell").innerText
         
         If delStatus = "Entregado" Then
             CheckRemedySynUpsStatus
             
-            delDate = .document.GetElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_dt_rec_cell").InnerText
+            delDate = .document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_dt_rec_cell").innerText
             
             statusVal = delStatus
             SyncreonCheckDeliveryStatus = Left(delDate, Len(delDate) - 3)
         ' If it was delivered through UPS but in Syncreon appears SKYNET as carrier
-        ElseIf InStr(LCase(.document.GetElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carrier_cell").InnerText), "tipsa") = 0 Then
+        ElseIf InStr(LCase(.document.getElementById("jrepapp_view_formauto_boxes_sqltable_sqltable_1_0_carrier_cell").innerText), "tipsa") = 0 Then
             CheckRemedySynUpsStatus
             
             ' UPS
             delDate = UPSGetDeliveryDate(trackingNumber)
-
-            If InStr(LCase(delDate), "sender") = 0 And InStr(LCase(delDate), "returning") = 0 And InStr(LCase(delDate), "ups could not") = 0 And InStr(delDate, "/") = 0 Then
+            
+            If InStr(LCase(delDate), "sender") = 0 And InStr(LCase(delDate), "returning") = 0 And InStr(LCase(delDate), "ups could not") = 0 And InStr(delDate, "/") = 0 And InStr(LCase(delDate), "update") = 0 Then
                 ' Not yet delivered
                 statusVal = "-1"
-            ElseIf InStr(LCase(delDate), "sender") <> 0 And InStr(LCase(delDate), "returning") <> 0 Then
+            ElseIf InStr(LCase(delDate), "sender") <> 0 Or InStr(LCase(delDate), "returning") <> 0 Then
                 ' Returning to sender
                 statusVal = delDate ' Returns the UPS comment status
             ElseIf InStr(LCase(delDate), "ups could not locate the shipment details for this tracking number") <> 0 Then
                 ' Tracking code not active
                 statusVal = "ups_trck_fail"
+            ElseIf InStr(LCase(delDate), "update") <> 0 Then
+                ' Manual check required
+                statusVal = "manual_check"
             Else
                 ' Delivered
                 statusVal = "Delivered"
@@ -244,8 +292,8 @@ Private Function SyncreonCheckDeliveryStatus(ByRef statusVal As String) As Strin
         
 ErrorHandler:
         ' First we check for the "NO EXISTE" syncreon comment
-        If Not (.document.GetElementById("H__eci_call_in.comments_syncreon") Is Nothing) Then
-            syncComment = .document.GetElementById("H__eci_call_in.comments_syncreon").InnerText
+        If Not (.document.getElementById("H__eci_call_in.comments_syncreon") Is Nothing) Then
+            syncComment = .document.getElementById("H__eci_call_in.comments_syncreon").innerText
             
             ' If the "NO EXISTE" syncreon comment exists
             If Len(syncComment) <> 0 Then
@@ -284,21 +332,21 @@ Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, Optional delSt
     While Remedy.ReadyState <> 4 Or Remedy.Busy: DoEvents: Wend
     
     ' If the package was refused adds the notes to Remedy
-    If InStr(delStatus, "refused") > 0 Or InStr(delStatus, "sender") > 0 Then
-        With Remedy
-            Application.Wait (Now + TimeValue("0:00:5"))
-            
-            ' Checks if the note ia already present
-            If InStr(.document.GetElementById("T301389614").InnerText, delStatus) = 0 Then
-                ' Adds the notes
-                HTMLElementDispatchValue .document, .document.GetElementById("arid_WIN_1_304247080"), "Courier Notes: " & delStatus
-                ' Checks the 'Public' checkbox
-                .document.GetElementById("WIN_1_rc1id1000000761").Click
-                ' Saves the changes
-                .document.GetElementById("WIN_1_301614800").Click
-            End If
-        End With
-    End If
+'    If InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Then
+'        With Remedy
+'            Application.Wait (Now + TimeValue("0:00:5"))
+'
+'            ' Checks if the note ia already present
+'            If InStr(.document.GetElementById("T301389614").InnerText, delStatus) = 0 Then
+'                ' Adds the notes
+'                HTMLElementDispatchValue .document, .document.GetElementById("arid_WIN_1_304247080"), "Courier Notes: " & delStatus
+'                ' Checks the 'Public' checkbox
+'                .document.GetElementById("WIN_1_rc1id1000000761").Click
+'                ' Saves the changes
+'                .document.GetElementById("WIN_1_301614800").Click
+'            End If
+'        End With
+'    End If
 End Function
 
 ' Function used to click on the Status Reason Item
@@ -325,7 +373,7 @@ Private Function RemedyProcessINC_statReasonNoFurthActReqClick()
         .document.parentWindow.execScript "var e = document.createElement('INPUT');e.setAttribute('id', 'adi_marian_mutu');e.setAttribute('type', 'hidden');document.body.appendChild(e);", "Javascript"
     
         ' Expands the Status Reason listbox
-        .document.GetElementById("arid_WIN_1_1000000881").Click
+        .document.getElementById("arid_WIN_1_1000000881").Click
         
         ' Waits for the list to load
         While .ReadyState <> 4 Or .Busy: DoEvents: Wend
@@ -335,7 +383,7 @@ Private Function RemedyProcessINC_statReasonNoFurthActReqClick()
         .document.parentWindow.execScript "try { var el = document.getElementsByClassName(""MenuTable"")(0).getElementsByClassName(""MenuTableBody"")(0).getElementsByClassName(""MenuEntryName"")(5);function getPosition(el){var xPos = 0;var yPos = 0;while (el) {if (el.tagName == ""BODY"") {var xScroll = el.scrollLeft || document.documentElement.scrollLeft;var yScroll = el.scrollTop || document.documentElement.scrollTop;xPos += (el.offsetLeft - xScroll + el.clientLeft);yPos += (el.offsetTop - yScroll + el.clientTop);} else {xPos += (el.offsetLeft - el.scrollLeft + el.clientLeft);yPos += (el.offsetTop - el.scrollTop + el.clientTop);}el = el.offsetParent;}return{x: xPos,y: yPos};} var _p = getPosition(el); document.getElementById(""adi_marian_mutu"").value = _p.x + "","" + _p.y; } catch(err) { window.alert(""<PDARFID_AUTO_JS_NoFurthActClick_ERROR>\n\n"" + err); }", "Javascript"
         
         ' Calculates the correct element coordinates
-        coord_str = .document.GetElementById("adi_marian_mutu").Value
+        coord_str = .document.getElementById("adi_marian_mutu").Value
         x = .Left + (Left(coord_str, InStr(coord_str, ",") - 1) + 50)
         y = .Top + (Right(coord_str, InStr(coord_str, ",") - 1) + 72)
         
@@ -372,15 +420,15 @@ Private Function RemedyProcessINC(ByVal inc As String, ByVal note As String) As 
         CheckRemedySynUpsStatus
         Application.Wait (Now + TimeValue("0:00:2"))
         
-        remedyTktStatus = .document.GetElementById("arid_WIN_1_7").Value
+        remedyTktStatus = .document.getElementById("arid_WIN_1_7").Value
         If remedyTktStatus <> "Resolved" And remedyTktStatus <> "Closed" Then
             ' Changes the Status dropbox menu to Resolved
-            HTMLElementDispatchValue .document, .document.GetElementById("arid_WIN_1_7"), "Resolved"
+            HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_7"), "Resolved"
             ' Changes the Status Reason dropbox menu to No Further Action Required
             RemedyProcessINC_statReasonNoFurthActReqClick
             
             ' Before saving the changes, checks if the Status Reason is "No Further Action Required"
-            If .document.GetElementById("arid_WIN_1_1000000881").Value <> "No Further Action Required" Then
+            If .document.getElementById("arid_WIN_1_1000000881").Value <> "No Further Action Required" Then
                 MsgBox ("[PDA & RFID PROCESS]" & vbNewLine & vbNewLine & "Unable to correctly click on ""No Further Action Required"" item!" & vbNewLine & vbNewLine & " > Click ""Ok"" to stop the script and try again" & vbNewLine & vbNewLine & "> If the problem persists, please call Adi")
                 End
             End If
@@ -388,7 +436,7 @@ Private Function RemedyProcessINC(ByVal inc As String, ByVal note As String) As 
             ' Add the Delivery Date to the 'Notes' inputbox
             ' Before adding the Delivery Date note, checks if is already present
             delNote = "Delivered on: " & note
-            dn = .document.GetElementById("T301389614").InnerText
+            dn = .document.getElementById("T301389614").innerText
             
             If InStr(dn, "Delivered on:") > 0 Then
                 dn = Mid(dn, InStr(dn, "Delivered on:"))
@@ -396,19 +444,19 @@ Private Function RemedyProcessINC(ByVal inc As String, ByVal note As String) As 
             End If
             
             If dn <> delNote Then
-                HTMLElementDispatchValue .document, .document.GetElementById("arid_WIN_1_304247080"), delNote
+                HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_304247080"), delNote
             End If
             
             ' Checks the 'Public' checkbox
-            .document.GetElementById("WIN_1_rc1id1000000761").Click
+            .document.getElementById("WIN_1_rc1id1000000761").Click
             
             ' Saves the changes
-            .document.GetElementById("WIN_1_301614800").Click
+            .document.getElementById("WIN_1_301614800").Click
             
             ' Checks if the tkt was successfully saved
             Application.Wait (Now + TimeValue("0:00:5"))
             
-            If TypeName(.document.GetElementById("pbartable").getElementsByClassName("prompttext prompttexterr")(0)) <> "Nothing" Then
+            If TypeName(.document.getElementById("pbartable").getElementsByClassName("prompttext prompttexterr")(0)) <> "Nothing" Then
                 RemedyProcessINC = 0
             Else
                 RemedyProcessINC = 1
@@ -423,7 +471,7 @@ Private Function RemedyExtractSR(ByRef Remedy As Object) As String
     On Error GoTo ErrorHandler:
 
     With Remedy
-        r = .document.GetElementById("arid_WIN_1_1000000652").InnerText
+        r = .document.getElementById("arid_WIN_1_1000000652").innerText
         
         Dim rgx As Object
         Set rgx = CreateObject("VBScript.RegExp"): rgx.Pattern = "[0-9]":
@@ -446,17 +494,30 @@ ErrorHandler:
     RemedyExtractSR = "<unable_to_get_SR>"
 End Function
 
+Private Function GetColumnLetterFromCellValue(ByVal cellValue As String) As String
+    On Error GoTo ErrorHandler:
+    ret = Split(Cells(1, WorksheetFunction.Match(cellValue, ActiveWorkbook.Sheets(ActiveSheet.Name).Range("1:1"), 0)).Address(True, False), "$")
+    
+    GetColumnLetterFromCellValue = ret(0)
+    Exit Function
+    
+ErrorHandler:
+    ' If an unexpected error will rise
+    MsgBox ("[PDA & RFID PROCESS]" & vbNewLine & vbNewLine & "Function: _GetColumnLetterFromCellValue_ *no value found" & vbNewLine & vbNewLine & " > Click ""Ok"" to stop the script and please call Adi to inform him about the problem")
+    End
+End Function
+
 
 Public Sub PDARFIDAuto()
     ' Excel INC column header
-    incColumn = "A"
+    incColumn = GetColumnLetterFromCellValue("Incident ID*+")
     ' Excel Notes column header
-    notesColumn = "F"
+    notesColumn = GetColumnLetterFromCellValue("Notes")
     ' Excel Service Request column header
-    srColumn = "H"
+    srColumn = Chr(Asc(notesColumn) + 2)
     ' Excel Delivery Date column header
-    delDateColumn = "I"
-    
+    delDateColumn = Chr(Asc(notesColumn) + 3)
+
     ' Used to check if IE is running
     Dim ie As Object: Set ie = GetIEHandler
     If ie Is Nothing Then
@@ -474,7 +535,11 @@ Public Sub PDARFIDAuto()
     
     ' Checks if Remedy, Syncreon and the UPS Tracking tabs are open
     CheckRemedySynUpsStatus
-
+    
+    ' Changes the width of the "Notes" column
+    If Columns(GetColumnLetterFromCellValue("Notes")).ColumnWidth < 29 Then
+        Columns(GetColumnLetterFromCellValue("Notes")).ColumnWidth = 29
+    End If
     ' Adds the column header if not present
     If Range(srColumn & 1) <> "Service Request" Then
         Columns(srColumn).HorizontalAlignment = xlCenter
@@ -554,12 +619,17 @@ Public Sub PDARFIDAuto()
                         
                         ' Changes the color to highlight the tkt
                         Range(notesColumn & Rng.Row).Font.ColorIndex = 32
+                    ElseIf delStatus = "manual_check" Then
+                        delStatus = "<MANUAL_CHECK_REQUIRED>" & vbNewLine & "Please go to UPS > Detailed View  and check there for any useful information"
+                        
+                        ' Changes the color to highlight the tkt
+                        Range(notesColumn & Rng.Row).Font.ColorIndex = 3
                     Else
                     ' If this point is reached, this means that the device is still not delivered
                         delStatus = "<not_yet_delivered>"
                     End If
                 ' If the device was refused or returned to sender, we still must extract the Service Request number
-                ElseIf InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Or InStr(LCase(delStatus), "returning") > 0 Then
+                ElseIf InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Or InStr(LCase(delStatus), "returning") > 0 Or InStr(LCase(delStatus), "update") > 0 Then
                     ' Used to refresh the Remedy tab handler
                     Dim IERemedy As Object
                     Set IERemedy = Nothing
