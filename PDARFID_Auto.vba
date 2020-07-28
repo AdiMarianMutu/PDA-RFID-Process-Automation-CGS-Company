@@ -266,11 +266,12 @@ Private Function SyncreonCheckDeliveryStatus(ByRef statusVal As String) As Strin
             
             ' UPS
             delDate = UPSGetDeliveryDate(trackingNumber)
-            
-            If InStr(LCase(delDate), "sender") = 0 And InStr(LCase(delDate), "returning") = 0 And InStr(LCase(delDate), "ups could not") = 0 And InStr(delDate, "/") = 0 And InStr(LCase(delDate), "update") = 0 Then
+
+            If InStr(LCase(delDate), "sender") = 0 And InStr(LCase(delDate), "returning") = 0 And InStr(LCase(delDate), "return") = 0 And InStr(LCase(delDate), "ups could not") = 0 And InStr(delDate, "/") = 0 And InStr(LCase(delDate), "update") = 0 Then
                 ' Not yet delivered
-                statusVal = "-1"
-            ElseIf InStr(LCase(delDate), "sender") <> 0 Or InStr(LCase(delDate), "returning") <> 0 Then
+                'statusVal = "-1" -- Legacy
+                statusVal = delDate
+            ElseIf InStr(LCase(delDate), "sender") <> 0 Or InStr(LCase(delDate), "returning") <> 0 Or InStr(LCase(delDate), "return") <> 0 Then
                 ' Returning to sender
                 statusVal = delDate ' Returns the UPS comment status
             ElseIf InStr(LCase(delDate), "ups could not locate the shipment details for this tracking number") <> 0 Then
@@ -322,7 +323,7 @@ Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, Optional delSt
         ' Used to prevent the "Stay on this page/Leave this page" popup
         .document.parentWindow.execScript "window.onbeforeunload = null;", "Javascript"
         ' Open the new INC in a new tab
-        .Navigate "https://extranet.inditex.com/arsys/servlet/ViewFormServlet?server=itxars&form=HPD:Help+Desk&qual=%271000000161%27%3D%22" & inc & "%22", CLng(2049)
+        .Navigate "https://itx.onbmc.com/arsys/forms/onbmc-s/HPD%3AHelp+Desk/Best+Practice+View/?qual=%271000000161%27%3D%22" & inc & "%22", CLng(2049)
         ' Closes the current open INC tab
         .Quit
     End With
@@ -330,23 +331,6 @@ Private Function RemedyOpenINC(ByVal inc As String, ByRef Remedy, Optional delSt
     ' Wait for the new Remedy tab to load and assign the handler
     While Remedy Is Nothing: Set Remedy = GetIEHandler("Remedy"): DoEvents: Wend
     While Remedy.ReadyState <> 4 Or Remedy.Busy: DoEvents: Wend
-    
-    ' If the package was refused adds the notes to Remedy
-'    If InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Then
-'        With Remedy
-'            Application.Wait (Now + TimeValue("0:00:5"))
-'
-'            ' Checks if the note ia already present
-'            If InStr(.document.GetElementById("T301389614").InnerText, delStatus) = 0 Then
-'                ' Adds the notes
-'                HTMLElementDispatchValue .document, .document.GetElementById("arid_WIN_1_304247080"), "Courier Notes: " & delStatus
-'                ' Checks the 'Public' checkbox
-'                .document.GetElementById("WIN_1_rc1id1000000761").Click
-'                ' Saves the changes
-'                .document.GetElementById("WIN_1_301614800").Click
-'            End If
-'        End With
-'    End If
 End Function
 
 ' Function used to click on the Status Reason Item
@@ -385,7 +369,7 @@ Private Function RemedyProcessINC_statReasonNoFurthActReqClick()
         ' Calculates the correct element coordinates
         coord_str = .document.getElementById("adi_marian_mutu").Value
         x = .Left + (Left(coord_str, InStr(coord_str, ",") - 1) + 50)
-        y = .Top + (Right(coord_str, InStr(coord_str, ",") - 1) + 72)
+        y = .Top + (Right(coord_str, InStr(coord_str, ",") - 1) + 60)
         
         ' Saves the cursor coordinates
         GetCursorPos curBack
@@ -421,6 +405,7 @@ Private Function RemedyProcessINC(ByVal inc As String, ByVal note As String) As 
         Application.Wait (Now + TimeValue("0:00:2"))
         
         remedyTktStatus = .document.getElementById("arid_WIN_1_7").Value
+        
         If remedyTktStatus <> "Resolved" And remedyTktStatus <> "Closed" Then
             ' Changes the Status dropbox menu to Resolved
             HTMLElementDispatchValue .document, .document.getElementById("arid_WIN_1_7"), "Resolved"
@@ -584,16 +569,19 @@ Public Sub PDARFIDAuto()
                 
                 ' If the remedy tkt is not successfully saved
                 If remResult = 0 Then
-                    Range(notesColumn & Rng.Row) = "<remedy_could_not_resolve_tkt>"
+                    Range(notesColumn & Rng.Row) = "<Remedy: could_not_resolve_tkt>"
+                    Range(notesColumn & Rng.Row).Font.ColorIndex = 46
+                    Range(srColumn & Rng.Row).Font.ColorIndex = 46
+                    Range(delDateColumn & Rng.Row).Font.ColorIndex = 46
                 ElseIf remResult = 1 Then
-                    Range(notesColumn & Rng.Row) = "<remedy_tkt_resolved>"
+                    Range(notesColumn & Rng.Row) = "<Remedy: tkt_resolved>"
                     
                     ' Changes the color of successfully received and saved tkts
                     Range(notesColumn & Rng.Row).Font.ColorIndex = 10
                     Range(srColumn & Rng.Row).Font.ColorIndex = 10
                     Range(delDateColumn & Rng.Row).Font.ColorIndex = 10
                 Else
-                    Range(notesColumn & Rng.Row) = "<remedy_tkt_already_resolved>"
+                    Range(notesColumn & Rng.Row) = "<Remedy: tkt_already_resolved>"
                 End If
                 
                 ' Extracts the SR
@@ -603,19 +591,19 @@ Public Sub PDARFIDAuto()
             Else
                 ' Updates the notes column
                 ' If is not any of the possible cases below
-                If InStr(delStatus, "NO EXISTE") = 0 And InStr(LCase(delStatus), "refused") = 0 And InStr(LCase(delStatus), "sender") = 0 And InStr(LCase(delStatus), "returning") = 0 Then
+                If InStr(delStatus, "NO EXISTE") = 0 And InStr(LCase(delStatus), "refused") = 0 And InStr(LCase(delStatus), "sender") = 0 And InStr(LCase(delStatus), "returning") = 0 And InStr(LCase(delStatus), "return") = 0 Then
                     ' If the Syncreon page is empty
                     
                     If delStatus = "" Or delStatus = "null" Then
-                        delStatus = "<sync_page_empty>" '"<syncreon_empty_or_manual_check_required>"
+                        delStatus = "<Syncreon: page_empty>" '"<syncreon_empty_or_manual_check_required>"
                         Range(notesColumn & Rng.Row).Font.ColorIndex = 3
                     ElseIf delStatus = "no_track" Then
-                        delStatus = "<sync_trckcode_not_available>"
+                        delStatus = "<Syncreon: trckcode_not_available>"
                         
                         ' Changes the color to highlight the tkt
                         Range(notesColumn & Rng.Row).Font.ColorIndex = 32
                     ElseIf delStatus = "ups_trck_fail" Then
-                        delStatus = "<ups_trckcode_not_active>"
+                        delStatus = "<UPS: trckcode_not_active>"
                         
                         ' Changes the color to highlight the tkt
                         Range(notesColumn & Rng.Row).Font.ColorIndex = 32
@@ -624,12 +612,14 @@ Public Sub PDARFIDAuto()
                         
                         ' Changes the color to highlight the tkt
                         Range(notesColumn & Rng.Row).Font.ColorIndex = 3
+                    ElseIf delStatus = "-1" Then
+                        delStatus = "<Tipsa: Not yet delivered or delivery date missing>"
                     Else
                     ' If this point is reached, this means that the device is still not delivered
-                        delStatus = "<not_yet_delivered>"
+                        delStatus = "<UPS Note: " & delStatus & ">"
                     End If
                 ' If the device was refused or returned to sender, we still must extract the Service Request number
-                ElseIf InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Or InStr(LCase(delStatus), "returning") > 0 Or InStr(LCase(delStatus), "update") > 0 Then
+                ElseIf InStr(LCase(delStatus), "refused") > 0 Or InStr(LCase(delStatus), "sender") > 0 Or InStr(LCase(delStatus), "returning") > 0 Or InStr(LCase(delStatus), "return") > 0 Or InStr(LCase(delStatus), "update") > 0 Then
                     ' Used to refresh the Remedy tab handler
                     Dim IERemedy As Object
                     Set IERemedy = Nothing
@@ -640,11 +630,7 @@ Public Sub PDARFIDAuto()
                     Application.Wait (Now + TimeValue("0:00:3"))
                     ' Extracts the SR
                     Range(srColumn & Rng.Row) = RemedyExtractSR(IERemedy)
-                End If
-                
-                ' Sometimes UPS Tracking leaves a non complete note "Returning" instead of "Returning to Sender"
-                If LCase(delStatus) = "returning" Then
-                    delStatus = "Returning to Sender"
+                    delStatus = "<UPS: Returning to Sender>"
                 End If
                 
                 Range(notesColumn & Rng.Row) = delStatus
